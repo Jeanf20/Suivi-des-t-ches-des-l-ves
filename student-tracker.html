@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suivi du travail des élèves</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow-x: auto;
+        }
+        h1 {
+            margin-top: 0;
+            color: #333;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            background: white;
+        }
+        td {
+            border: 1px solid #ddd;
+            width: 80px;
+            height: 40px;
+            text-align: center;
+            vertical-align: middle;
+            position: relative;
+        }
+        .header-cell, .name-cell {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+        .header-cell input, .name-cell input {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: transparent;
+            text-align: center;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .clickable-cell {
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+        .clickable-cell:hover {
+            opacity: 0.8;
+        }
+        .clickable-cell.green {
+            background-color: #4CAF50;
+        }
+        .clickable-cell.yellow {
+            background-color: #FFC107;
+        }
+        .checkmark {
+            font-size: 24px;
+            font-weight: bold;
+            display: none;
+        }
+        .undo-banner {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #333;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 4px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            z-index: 1000;
+            display: none;
+        }
+        .undo-banner button {
+            margin-left: 15px;
+            background-color: #ff9800;
+            padding: 5px 15px;
+        }
+        .undo-banner button:hover {
+            background-color: #e68900;
+        }
+        .confirmation-dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+            z-index: 2000;
+            display: none;
+            min-width: 300px;
+            text-align: center;
+        }
+        .confirmation-dialog p {
+            margin: 0 0 20px 0;
+            font-size: 16px;
+            color: #333;
+        }
+        .confirmation-dialog button {
+            margin: 0 10px;
+            padding: 10px 20px;
+        }
+        .confirmation-dialog .cancel-btn {
+            background-color: #757575;
+        }
+        .confirmation-dialog .cancel-btn:hover {
+            background-color: #616161;
+        }
+        .dialog-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 1999;
+            display: none;
+        }
+        .corner-cell {
+            background-color: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Suivi du travail des élèves</h1>
+        <div class="controls">
+            <button onclick="addColumn()">Ajouter une colonne</button>
+        </div>
+        <table id="tracker"></table>
+    </div>
+
+    <div class="undo-banner" id="undoBanner">
+        <span id="undoMessage"></span>
+        <button onclick="undoLastAction()">Annuler</button>
+    </div>
+
+    <div class="dialog-overlay" id="dialogOverlay"></div>
+    <div class="confirmation-dialog" id="confirmDialog">
+        <p id="confirmMessage"></p>
+        <button onclick="confirmDialogResponse(true)">Oui</button>
+        <button class="cancel-btn" onclick="confirmDialogResponse(false)">Non</button>
+    </div>
+
+    <script>
+        let rows = 25;
+        let cols = 15;
+        let checkStates = {};
+        let lastAction = null;
+        let undoTimer = null;
+        let confirmResolve = null;
+
+        function showConfirmDialog(message) {
+            return new Promise((resolve) => {
+                confirmResolve = resolve;
+                document.getElementById('confirmMessage').textContent = message;
+                document.getElementById('dialogOverlay').style.display = 'block';
+                document.getElementById('confirmDialog').style.display = 'block';
+            });
+        }
+
+        function confirmDialogResponse(response) {
+            document.getElementById('dialogOverlay').style.display = 'none';
+            document.getElementById('confirmDialog').style.display = 'none';
+            if (confirmResolve) {
+                confirmResolve(response);
+                confirmResolve = null;
+            }
+        }
+
+        function initTable() {
+            const table = document.getElementById('tracker');
+            table.innerHTML = '';
+            
+            for (let i = 0; i < rows; i++) {
+                const tr = document.createElement('tr');
+                
+                for (let j = 0; j < cols; j++) {
+                    const td = document.createElement('td');
+                    
+                    if (i === 0 && j === 0) {
+                        td.className = 'corner-cell';
+                    } else if (i === 0) {
+                        td.className = 'header-cell';
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.placeholder = `Col ${j}`;
+                        input.value = localStorage.getItem(`header-${j}`) || '';
+                        input.addEventListener('input', (e) => {
+                            localStorage.setItem(`header-${j}`, e.target.value);
+                        });
+                        td.appendChild(input);
+                    } else if (j === 0) {
+                        td.className = 'name-cell';
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.placeholder = `Élève ${i}`;
+                        input.value = localStorage.getItem(`student-${i}`) || '';
+                        input.addEventListener('input', (e) => {
+                            localStorage.setItem(`student-${i}`, e.target.value);
+                        });
+                        td.appendChild(input);
+                    } else {
+                        td.className = 'clickable-cell';
+                        td.dataset.row = i;
+                        td.dataset.col = j;
+                        
+                        const key = `${i}-${j}`;
+                        if (checkStates[key] === 'green') {
+                            td.classList.add('green');
+                        } else if (checkStates[key] === 'yellow') {
+                            td.classList.add('yellow');
+                        }
+                        
+                        td.addEventListener('click', toggleCheck);
+                        td.addEventListener('touchend', toggleCheck); // iPad support
+                    }
+                    
+                    tr.appendChild(td);
+                }
+                
+                table.appendChild(tr);
+            }
+        }
+
+        function toggleCheck(e) {
+            e.preventDefault();
+            
+            const cell = e.currentTarget;
+            const row = cell.dataset.row;
+            const col = cell.dataset.col;
+            const key = `${row}-${col}`;
+            
+            const currentState = checkStates[key] || 'empty';
+            
+            handleCheckToggle(cell, row, col, key, currentState);
+        }
+
+        async function handleCheckToggle(cell, row, col, key, currentState) {
+            if (currentState === 'empty') {
+                checkStates[key] = 'green';
+                cell.classList.add('green');
+                saveCheckStates();
+                
+                lastAction = {
+                    row: row,
+                    col: col,
+                    key: key,
+                    previousState: 'empty'
+                };
+                
+                showUndoBanner('Case verte ajoutée');
+                
+            } else if (currentState === 'green') {
+                const confirmed = await showConfirmDialog('Changer pour une case jaune ?');
+                if (!confirmed) {
+                    return;
+                }
+                checkStates[key] = 'yellow';
+                cell.classList.remove('green');
+                cell.classList.add('yellow');
+                saveCheckStates();
+                
+                lastAction = {
+                    row: row,
+                    col: col,
+                    key: key,
+                    previousState: 'green'
+                };
+                
+                showUndoBanner('Changé pour une case jaune');
+                
+            } else if (currentState === 'yellow') {
+                const confirmed = await showConfirmDialog('Êtes-vous sûr de vouloir supprimer cette case ?');
+                if (!confirmed) {
+                    return;
+                }
+                delete checkStates[key];
+                cell.classList.remove('yellow');
+                saveCheckStates();
+                
+                lastAction = {
+                    row: row,
+                    col: col,
+                    key: key,
+                    previousState: 'yellow'
+                };
+                
+                showUndoBanner('Case supprimée');
+            }
+        }
+
+        function showUndoBanner(message) {
+            const banner = document.getElementById('undoBanner');
+            const messageEl = document.getElementById('undoMessage');
+            
+            messageEl.textContent = message;
+            banner.style.display = 'block';
+            
+            // Clear existing timer
+            if (undoTimer) {
+                clearTimeout(undoTimer);
+            }
+            
+            // Hide banner after 5 seconds
+            undoTimer = setTimeout(() => {
+                banner.style.display = 'none';
+            }, 5000);
+        }
+
+        function undoLastAction() {
+            if (!lastAction) return;
+            
+            const { row, col, key, previousState } = lastAction;
+            
+            // Restore previous state
+            if (previousState === 'empty') {
+                delete checkStates[key];
+            } else {
+                checkStates[key] = previousState;
+            }
+            
+            saveCheckStates();
+            
+            // Update the cell visually
+            const cells = document.querySelectorAll('.clickable-cell');
+            cells.forEach(cell => {
+                if (cell.dataset.row === row && cell.dataset.col === col) {
+                    cell.classList.remove('green', 'yellow');
+                    if (previousState === 'green') {
+                        cell.classList.add('green');
+                    } else if (previousState === 'yellow') {
+                        cell.classList.add('yellow');
+                    }
+                }
+            });
+            
+            // Hide banner
+            document.getElementById('undoBanner').style.display = 'none';
+            lastAction = null;
+        }
+
+        function addColumn() {
+            cols++;
+            initTable();
+        }
+
+        function saveCheckStates() {
+            localStorage.setItem('checkStates', JSON.stringify(checkStates));
+        }
+
+        function loadCheckStates() {
+            const saved = localStorage.getItem('checkStates');
+            if (saved) {
+                checkStates = JSON.parse(saved);
+            }
+        }
+
+        loadCheckStates();
+        initTable();
+    </script>
+</body>
+</html>
